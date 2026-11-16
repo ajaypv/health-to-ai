@@ -22,7 +22,7 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk`. Install with
 
 1. Android 14+ has Health Connect built in. On Android 9-13 install "Health Connect" from the Play Store.
 2. Make sure a fitness app (Google Fit, Samsung Health, Fitbit, a watch app) writes steps and sleep into Health Connect.
-3. Open the app, tap **Connect Health Connect**, allow Steps, Distance and Sleep.
+3. Open the app, tap **Connect Health Connect** and allow the data types you want (allow all to see everything).
 
 ## Notes
 
@@ -32,3 +32,9 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk`. Install with
 - `public/privacypolicy.html` is shown when the user taps the permission rationale. Replace it with a real
   policy before publishing to the Play Store.
 - Change `appId` in `capacitor.config.ts` before publishing.
+
+## Stress
+
+Health Connect has no stress-score data type, so stress scores from Samsung Health, Fitbit or Garmin are not
+available to any app. The app shows HRV and resting heart rate, the closest signals Health Connect exposes.
+Which data appears depends on what your watch or phone apps write into Health Connect.
