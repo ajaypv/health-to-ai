@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Activity POC</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Today's activity</h1>
+      <p id="status" class="muted">Starting…</p>
+
+      <button id="connect" hidden>Connect Health Connect</button>
+      <button id="refresh" hidden>Refresh</button>
+
+      <section id="cards" hidden>
+        <div class="card"><span class="label">Steps</span><span id="steps" class="value">–</span></div>
+        <div class="card"><span class="label">Walked</span><span id="distance" class="value">–</span></div>
+        <div class="card"><span class="label">Last sleep</span><span id="sleep" class="value">–</span></div>
+      </section>
+
+      <section id="weekSection" hidden>
+        <h2>Last 7 days (steps)</h2>
+        <ul id="week"></ul>
+      </section>
+
+      <section id="sleepSection" hidden>
+        <h2>Sleep sessions</h2>
+        <ul id="sleepList"></ul>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
