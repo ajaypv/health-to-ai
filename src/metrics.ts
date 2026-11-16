@@ -22,7 +22,10 @@ const n0 = (v: number) => Math.round(v).toLocaleString();
 const n1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString();
 const n2 = (v: number) => (Math.round(v * 100) / 100).toLocaleString();
 const unit = (u: string, f: (v: number) => string = n0) => (v: number) => `${f(v)} ${u}`;
-export const fmtMinutes = (min: number) => `${Math.floor(min / 60)}h ${Math.round(min % 60)}m`;
+export const fmtMinutes = (min: number) => {
+  const total = Math.round(min);
+  return total < 60 ? `${total}m` : `${Math.floor(total / 60)}h ${total % 60}m`;
+};
 export const fmtDistance = (m: number) => (m >= 1000 ? `${n2(m / 1000)} km` : `${n0(m)} m`);
 
 export const METRICS: Metric[] = [

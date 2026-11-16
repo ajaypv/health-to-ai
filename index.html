@@ -3,30 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Activity POC</title>
+    <meta name="color-scheme" content="light dark" />
+    <title>Health</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main>
-      <h1>Health data</h1>
-      <p id="status" class="muted">Starting…</p>
+    <div id="app">
+      <header class="top">
+        <div>
+          <p class="eyebrow" id="date"></p>
+          <h1>Health</h1>
+          <p id="status" class="status" data-state="busy" role="status"><i></i><span>Starting…</span></p>
+        </div>
+        <div class="actions">
+          <button id="refresh" class="icon-btn" aria-label="Refresh" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
+          </button>
+          <button id="copy" class="icon-btn" aria-label="Copy all data as JSON" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></svg>
+          </button>
+        </div>
+      </header>
 
-      <div class="row">
-        <button id="connect" hidden>Connect Health Connect</button>
-        <button id="refresh" class="secondary" hidden>Refresh</button>
-        <button id="copy" class="secondary" hidden>Copy as JSON</button>
+      <div class="sticky" id="rangeWrap" hidden>
+        <div id="range" class="seg" role="group" aria-label="Time range">
+          <button data-days="1" aria-pressed="true">Today</button>
+          <button data-days="7" aria-pressed="false">7 days</button>
+          <button data-days="30" aria-pressed="false">30 days</button>
+        </div>
       </div>
 
-      <div id="range" class="seg" hidden role="group" aria-label="Time range">
-        <button data-days="1" aria-pressed="true">Today</button>
-        <button data-days="7" aria-pressed="false">7 days</button>
-        <button data-days="30" aria-pressed="false">30 days</button>
-      </div>
+      <section id="onboard" class="onboard" hidden>
+        <div class="onboard-icon" aria-hidden="true">❤️</div>
+        <h2>See your health in one place</h2>
+        <p>Connect to Health Connect to read steps, heart rate, sleep, workouts and more from your watch and phone apps.</p>
+        <ul class="ticks">
+          <li>Read only, nothing is changed</li>
+          <li>Data stays on this phone</li>
+          <li>You choose what to allow</li>
+        </ul>
+        <button id="connect" class="primary">Connect Health Connect</button>
+      </section>
 
-      <div id="content"></div>
+      <p id="unavailable" class="note" hidden></p>
+
+      <main id="content"></main>
 
       <textarea id="json" hidden readonly rows="8" aria-label="JSON export"></textarea>
-    </main>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

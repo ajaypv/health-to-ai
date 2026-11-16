@@ -1,16 +1,37 @@
-import { Health } from '@capgo/capacitor-health';
+import { Capacitor } from '@capacitor/core';
+import { Health as NativeHealth } from '@capgo/capacitor-health';
 import type { HealthDataType, HealthSample, SleepStage, Workout } from '@capgo/capacitor-health';
+import { demoHealth } from './demo';
 import { GROUPS, METRICS, fmtDistance, fmtMinutes } from './metrics';
 import type { Metric } from './metrics';
 
+/** `?demo` in a desktop browser swaps in fake data so the screen can be previewed. Never used on Android. */
+const DEMO = !Capacitor.isNativePlatform() && new URLSearchParams(location.search).has('demo');
+const Health = (DEMO ? demoHealth : NativeHealth) as typeof NativeHealth;
+
 // ---------- small helpers ----------
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const statusEl = $('status');
 const contentEl = $('content');
 const jsonEl = $<HTMLTextAreaElement>('json');
 const show = (e: HTMLElement, on: boolean) => { e.hidden = !on; };
-const setStatus = (msg: string) => { statusEl.textContent = msg; };
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+type State = 'busy' | 'ok' | 'err' | 'idle';
+function setStatus(msg: string, state: State = 'idle') {
+  const s = $('status');
+  s.dataset.state = state;
+  s.querySelector('span')!.textContent = msg;
+  $('refresh').classList.toggle('spin', state === 'busy');
+}
+
+let toastTimer = 0;
+function toast(msg: string) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => t.classList.remove('on'), 2200);
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string, ...kids: Node[]) {
   const node = document.createElement(tag);
@@ -30,6 +51,14 @@ const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-di
 const dateTime = (iso: string) =>
   new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+function ago(iso: string) {
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (min < 2) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} days ago`;
+}
 
 /** Run async jobs a few at a time: Health Connect rate-limits apps that fire too many reads at once. */
 async function pool<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -161,79 +190,200 @@ async function readWorkouts(from: Date, to: Date): Promise<Workout[]> {
 }
 
 // ---------- rendering ----------
-function metricCard(r: MetricResult, m: Metric, days: number): HTMLElement {
+const ICONS: Partial<Record<HealthDataType, string>> = {
+  steps: '👣', distance: '🚶', distanceCycling: '🚴', flightsClimbed: '🪜', calories: '🔥', totalCalories: '⚡', mindfulness: '🧘',
+  heartRate: '❤️', restingHeartRate: '💗', heartRateVariability: '📈', oxygenSaturation: '🫁', respiratoryRate: '🌬️', vo2Max: '🏃', bloodPressure: '🩸',
+  weight: '⚖️', height: '📏', bodyFat: '📊', bodyTemperature: '🌡️', basalBodyTemperature: '🌡️', basalCalories: '🔋', bloodGlucose: '🍬',
+  dietaryEnergyConsumed: '🍽️', dietaryProtein: '🥩', dietaryWater: '💧',
+};
+
+const WORKOUT_ICONS: Record<string, string> = {
+  running: '🏃', runningTreadmill: '🏃', walking: '🚶', hiking: '🥾', cycling: '🚴', bikingStationary: '🚴', swimming: '🏊', swimmingPool: '🏊',
+  yoga: '🧘', strengthTraining: '🏋️', traditionalStrengthTraining: '🏋️', weightlifting: '🏋️', rowing: '🚣', tennis: '🎾', soccer: '⚽', basketball: '🏀',
+  dance: '💃', boxing: '🥊', elliptical: '🏃', stairClimbing: '🪜',
+};
+const prettify = (s: string) => {
+  const t = s.replace(/([A-Z])/g, ' $1').toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+const GOAL_STEPS = 10_000;
+const GROUP_SLUG: Record<Metric['group'], string> = { Activity: 'activity', 'Heart & stress': 'heart', Body: 'body', Nutrition: 'nutrition' };
+
+function icon(emoji: string, cls = 'ic') {
+  const e = el('span', cls, emoji);
+  e.setAttribute('aria-hidden', 'true');
+  return e;
+}
+
+/** Bars for the last `days` days, today highlighted. */
+function bars(values: number[]) {
+  const max = Math.max(...values, 1);
+  const wrap = el('div', 'bars');
+  values.forEach((v, i) => {
+    const bar = el('i', i === values.length - 1 ? 'last' : v === 0 ? 'empty' : '');
+    bar.style.height = `${Math.max(6, (v / max) * 100)}%`;
+    wrap.append(bar);
+  });
+  return wrap;
+}
+
+function series(r: MetricResult, days: number, to: Date): number[] {
+  const map = new Map((r.daily ?? []).map((d) => [d.date, d.value]));
+  return Array.from({ length: days }, (_, i) => map.get(dayKey(new Date(to.getTime() - (days - 1 - i) * DAY))) ?? 0);
+}
+
+/** "42.9 ml/kg/min" -> big number, small unit. Text like "6h 44m" is left whole. */
+function splitUnit(text: string): [string, string] {
+  const hit = /^(-?[\d.,/]+)\s+(\S.*)$/.exec(text);
+  return hit ? [hit[1], hit[2]] : [text, ''];
+}
+function valueEl(text: string) {
+  const [n, u] = splitUnit(text);
+  return el('span', 'value', n, ...(u ? [el('small', undefined, u)] : []));
+}
+
+function metricCard(r: MetricResult, m: Metric, days: number, to: Date): HTMLElement {
   const card = el('div', 'card');
-  card.append(el('span', 'label', r.label));
+  card.append(el('div', 'card-head', undefined, icon(ICONS[m.id] ?? '•'), el('span', 'label', r.label)));
 
   if (m.kind === 'sum') {
-    card.append(el('span', 'value', m.format(r.today ?? 0)));
-    const sum = (r.daily ?? []).reduce((a, d) => a + d.value, 0);
-    card.append(el('span', 'sub', days === 1 ? 'today' : `today · avg ${m.format(sum / days)} / day`));
+    card.append(valueEl(m.format(r.today ?? 0)));
+    const total = (r.daily ?? []).reduce((a, d) => a + d.value, 0);
+    card.append(el('span', 'sub', days === 1 ? 'today' : `today · avg ${m.format(total / days)} a day`));
+    if (days > 1) card.append(bars(series(r, days, to)));
     return card;
   }
 
   const l = r.latest;
-  card.append(el('span', 'value', l ? (l.text ?? m.format(l.value)) : '–'));
-  const bits: string[] = [];
-  if (l) bits.push(dateTime(l.at));
+  card.append(l ? valueEl(l.text ?? m.format(l.value)) : el('span', 'value', '–'));
+  if (l) card.append(el('span', 'sub', ago(l.at)));
   if (r.kind === 'stat' && num(r.avg) && num(r.min) && num(r.max)) {
-    bits.push(`avg ${m.format(r.avg)} · ${m.format(r.min)}–${m.format(r.max)}`);
+    const [avg, unit] = splitUnit(m.format(r.avg));
+    const range = `${splitUnit(m.format(r.min))[0]}–${splitUnit(m.format(r.max))[0]}`;
+    card.append(el('span', 'sub', `avg ${avg} · range ${range} ${unit}`.trim()));
   }
-  if (l?.source) bits.push(l.source);
-  for (const b of bits) card.append(el('span', 'sub', b));
 
   if (r.hourly) {
     const vals = r.hourly.filter(num);
     const lo = Math.min(...vals);
     const hi = Math.max(...vals);
-    const spark = el('div', 'spark');
-    spark.title = 'Average heart rate by hour, today';
-    for (const v of r.hourly) {
-      const bar = el('i');
-      bar.style.height = v === null ? '2px' : `${20 + (hi === lo ? 40 : ((v - lo) / (hi - lo)) * 80)}%`;
-      if (v === null) bar.style.opacity = '.2';
-      spark.append(bar);
-    }
-    card.append(spark, el('span', 'sub', 'today by hour'));
+    const wrap = el('div', 'bars');
+    wrap.title = 'Average heart rate by hour, today';
+    r.hourly.forEach((v, i) => {
+      const bar = el('i', v === null ? 'empty' : i === new Date().getHours() ? 'last' : '');
+      bar.style.height = v === null ? '6%' : `${25 + (hi === lo ? 40 : ((v - lo) / (hi - lo)) * 75)}%`;
+      wrap.append(bar);
+    });
+    card.append(wrap, el('span', 'sub', 'today by hour'));
   }
+  if (l?.source) card.append(el('span', 'src', l.source));
   return card;
 }
 
-function listItem(title: string, detail: string, right: string) {
-  const left = el('span', undefined, title, ...(detail ? [el('small', undefined, detail)] : []));
-  return el('li', undefined, undefined, left, el('span', undefined, right));
+function heroCard(byId: Map<HealthDataType, MetricResult>, metrics: Map<HealthDataType, Metric>, sleep: SleepSession[]): HTMLElement | null {
+  const steps = byId.get('steps');
+  if (!steps) return null;
+  const n = steps.today ?? 0;
+  const pct = Math.min(1, n / GOAL_STEPS);
+  const C = 2 * Math.PI * 54;
+
+  const ringBox = el('div', 'ring');
+  ringBox.setAttribute('role', 'img');
+  ringBox.setAttribute('aria-label', `${Math.round(n)} steps today, ${Math.round(pct * 100)} percent of the ${GOAL_STEPS.toLocaleString()} goal`);
+  ringBox.innerHTML = `<svg viewBox="0 0 138 138"><circle class="track" cx="69" cy="69" r="54"/><circle class="fill" cx="69" cy="69" r="54" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>`;
+  ringBox.append(el('div', 'ring-c', undefined, el('b', undefined, Math.round(n).toLocaleString()), el('span', undefined, pct >= 1 ? 'goal reached 🎉' : `of ${GOAL_STEPS.toLocaleString()} steps`)));
+  requestAnimationFrame(() => requestAnimationFrame(() => ringBox.querySelector('.fill')?.setAttribute('stroke-dashoffset', String(C * (1 - pct)))));
+
+  const list = el('div', 'mini-list');
+  const mini = (emoji: string, big: string, small: string) =>
+    list.append(el('div', 'mini', undefined, icon(emoji), el('div', undefined, undefined, el('b', undefined, big), el('span', undefined, small))));
+  const dist = byId.get('distance');
+  const cal = byId.get('calories');
+  if (dist) mini('🚶', metrics.get('distance')!.format(dist.today ?? 0), 'walked today');
+  if (cal) mini('🔥', metrics.get('calories')!.format(cal.today ?? 0), 'active energy');
+  if (sleep[0]) mini('😴', fmtMinutes(sleep[0].asleepMinutes), 'last sleep');
+
+  return el('section', 'hero', undefined, ringBox, list);
 }
 
-function sleepSection(sessions: SleepSession[]): HTMLElement[] {
-  if (!sessions.length) return [];
+function stageBar(stages: Record<string, number>) {
+  const entries = Object.entries(stages).filter(([, v]) => v > 0);
+  if (!entries.length) return null;
+  const bar = el('div', 'stages');
+  bar.setAttribute('aria-hidden', 'true');
+  for (const [k, v] of entries) {
+    const seg = el('i', `st-${k}`);
+    seg.style.flex = `${v} 1 0`;
+    bar.append(seg);
+  }
+  const legend = el('div', 'legend');
+  for (const [k, v] of entries) {
+    const item = el('span', `st-${k}`, `${prettify(k)} ${fmtMinutes(v)}`);
+    item.style.background = 'none';
+    legend.append(item);
+  }
+  return [bar, legend];
+}
+
+function sleepSection(sessions: SleepSession[]): HTMLElement | null {
+  if (!sessions.length) return null;
+  const sec = el('section', 'group');
+  sec.dataset.g = 'sleep';
+  sec.append(el('h3', undefined, 'Sleep'));
+
   const last = sessions[0];
-  const avg = sessions.reduce((a, s) => a + s.asleepMinutes, 0) / sessions.length;
-  const grid = el('div', 'grid');
-  const a = el('div', 'card', undefined, el('span', 'label', 'Last sleep'), el('span', 'value', fmtMinutes(last.asleepMinutes)), el('span', 'sub', `${time(last.start)} – ${time(last.end)}`));
-  grid.append(a);
+  const card = el('div', 'card');
+  card.append(el('div', 'card-head', undefined, icon('😴'), el('span', 'label', 'Last sleep')));
+  card.append(el('span', 'value', fmtMinutes(last.asleepMinutes)));
+  card.append(el('span', 'sub', `${time(last.start)} to ${time(last.end)}${last.source ? ` · ${last.source}` : ''}`));
+  const sb = stageBar(last.stages);
+  if (sb) card.append(...sb);
+  sec.append(card);
+
   if (sessions.length > 1) {
-    grid.append(el('div', 'card', undefined, el('span', 'label', 'Average sleep'), el('span', 'value', fmtMinutes(avg)), el('span', 'sub', `${sessions.length} sessions`)));
+    const avg = sessions.reduce((a, s) => a + s.asleepMinutes, 0) / sessions.length;
+    sec.append(el('p', 'sub', `Average ${fmtMinutes(avg)} over ${sessions.length} sessions`));
+    const list = el('ul', 'list');
+    for (const s of sessions.slice(1, 15)) {
+      list.append(
+        el('li', undefined, undefined,
+          el('div', 'grow', undefined, el('b', undefined, dateTime(s.start)), el('small', undefined, `${time(s.start)} to ${time(s.end)}`)),
+          el('span', 'end', fmtMinutes(s.asleepMinutes))),
+      );
+    }
+    sec.append(list);
   }
-  const list = el('ul');
-  for (const s of sessions.slice(0, 14)) {
-    const stages = Object.entries(s.stages).map(([k, v]) => `${k} ${fmtMinutes(v)}`).join(' · ');
-    list.append(listItem(dateTime(s.start), [stages, s.source].filter(Boolean).join(' · '), fmtMinutes(s.asleepMinutes)));
-  }
-  return [el('h2', undefined, 'Sleep'), grid, list];
+  return sec;
 }
 
-function workoutSection(workouts: Workout[]): HTMLElement[] {
-  if (!workouts.length) return [];
-  const list = el('ul');
+function workoutSection(workouts: Workout[]): HTMLElement | null {
+  if (!workouts.length) return null;
+  const sec = el('section', 'group');
+  sec.dataset.g = 'workout';
+  sec.append(el('h3', undefined, 'Workouts'));
+  const list = el('ul', 'list');
   for (const w of workouts.slice(0, 20)) {
     const bits = [
       w.totalDistance ? fmtDistance(w.totalDistance) : '',
       w.totalEnergyBurned ? `${Math.round(w.totalEnergyBurned)} kcal` : '',
       w.sourceName ?? '',
     ].filter(Boolean);
-    list.append(listItem(`${w.workoutType} · ${dateTime(w.startDate)}`, bits.join(' · '), fmtMinutes(w.duration / 60)));
+    list.append(
+      el('li', undefined, undefined,
+        icon(WORKOUT_ICONS[w.workoutType] ?? '🏅'),
+        el('div', 'grow', undefined, el('b', undefined, prettify(w.workoutType)), el('small', undefined, [dateTime(w.startDate), ...bits].join(' · '))),
+        el('span', 'end', fmtMinutes(w.duration / 60))),
+    );
   }
-  return [el('h2', undefined, 'Workouts'), list];
+  sec.append(list);
+  return sec;
+}
+
+function skeleton(): Node[] {
+  const grid = el('div', 'grid');
+  grid.append(el('div', 'skel tall'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'));
+  return [grid];
 }
 
 // ---------- app ----------
@@ -241,96 +391,130 @@ const READ_TYPES: HealthDataType[] = [...METRICS.map((m) => m.id), 'sleep', 'wor
 let days = 1;
 let allowed = new Set<HealthDataType>();
 let lastExport: unknown = null;
+let loading = false;
 
 async function loadAll() {
-  setStatus('Reading…');
-  const now = new Date();
-  const from = startOfDay(new Date(now.getTime() - (days - 1) * DAY));
-  const sleepFrom = new Date(Math.min(from.getTime(), now.getTime() - 36 * 3_600_000));
-  const problems: string[] = [];
+  if (loading) return;
+  loading = true;
+  setStatus('Syncing…', 'busy');
+  if (contentEl.childElementCount === 0) contentEl.replaceChildren(...skeleton());
+  else contentEl.dataset.busy = 'true';
 
-  const wanted = METRICS.filter((m) => allowed.has(m.id));
-  const settled = await pool(wanted, 4, async (m) => {
-    try {
-      return await readMetric(m, from, now);
-    } catch (e) {
-      problems.push(`${m.label}: ${errText(e)}`);
-      return null;
+  try {
+    const now = new Date();
+    const from = startOfDay(new Date(now.getTime() - (days - 1) * DAY));
+    const sleepFrom = new Date(Math.min(from.getTime(), now.getTime() - 36 * 3_600_000));
+    const problems: string[] = [];
+
+    const wanted = METRICS.filter((m) => allowed.has(m.id));
+    const settled = await pool(wanted, 4, async (m) => {
+      try {
+        return await readMetric(m, from, now);
+      } catch (e) {
+        problems.push(`${m.label}: ${errText(e)}`);
+        return null;
+      }
+    });
+    const results = settled.filter((r): r is MetricResult => r !== null);
+
+    let sleep: SleepSession[] = [];
+    if (allowed.has('sleep')) {
+      try { sleep = await readSleep(sleepFrom, now); } catch (e) { problems.push(`Sleep: ${errText(e)}`); }
     }
-  });
-  const results = settled.filter((r): r is MetricResult => r !== null);
-
-  let sleep: SleepSession[] = [];
-  if (allowed.has('sleep')) {
-    try { sleep = await readSleep(sleepFrom, now); } catch (e) { problems.push(`Sleep: ${errText(e)}`); }
-  }
-  let workouts: Workout[] = [];
-  if (allowed.has('workouts')) {
-    try { workouts = await readWorkouts(from, now); } catch (e) { problems.push(`Workouts: ${errText(e)}`); }
-  }
-
-  const byMetric = new Map(METRICS.map((m) => [m.id, m]));
-  const hasData = (r: MetricResult) => (r.kind === 'sum' ? (r.daily?.some((d) => d.value > 0) ?? false) : r.count > 0);
-  const withData = results.filter(hasData);
-  const empty = results.filter((r) => !hasData(r)).map((r) => r.label);
-  const denied = METRICS.filter((m) => !allowed.has(m.id)).map((m) => m.label);
-
-  const nodes: Node[] = [];
-  for (const g of GROUPS) {
-    const rs = withData.filter((r) => r.group === g);
-    if (!rs.length) continue;
-    nodes.push(el('h2', undefined, g));
-    const grid = el('div', 'grid');
-    for (const r of rs) grid.append(metricCard(r, byMetric.get(r.id)!, days));
-    nodes.push(grid);
-    if (g === 'Heart & stress') {
-      nodes.push(el('p', 'note', 'Stress: Health Connect has no stress-score type, so stress scores from Samsung Health, Fitbit or Garmin are not shared with apps. HRV and resting heart rate are the closest signals available.'));
+    let workouts: Workout[] = [];
+    if (allowed.has('workouts')) {
+      try { workouts = await readWorkouts(from, now); } catch (e) { problems.push(`Workouts: ${errText(e)}`); }
     }
+
+    const metricById = new Map(METRICS.map((m) => [m.id, m]));
+    const hasData = (r: MetricResult) => (r.kind === 'sum' ? (r.daily?.some((d) => d.value > 0) ?? false) : r.count > 0);
+    const withData = results.filter(hasData);
+    const resultById = new Map(withData.map((r) => [r.id, r]));
+    const empty = results.filter((r) => !hasData(r)).map((r) => r.label);
+    const denied = [...METRICS.filter((m) => !allowed.has(m.id)).map((m) => m.label), ...(['sleep', 'workouts'] as const).filter((t) => !allowed.has(t)).map(prettify)];
+
+    const nodes: Node[] = [];
+    const hero = heroCard(resultById, metricById, sleep);
+    if (hero) nodes.push(hero);
+    const sleepSec = sleepSection(sleep);
+    if (sleepSec) nodes.push(sleepSec);
+
+    for (const g of GROUPS) {
+      const rs = withData.filter((r) => r.group === g);
+      if (!rs.length) continue;
+      const sec = el('section', 'group');
+      sec.dataset.g = GROUP_SLUG[g];
+      sec.append(el('h3', undefined, g));
+      const grid = el('div', 'grid');
+      for (const r of rs) grid.append(metricCard(r, metricById.get(r.id)!, days, now));
+      if (g === 'Heart & stress') {
+        grid.append(el('p', 'note', '🧠 Stress scores from Samsung Health, Fitbit or Garmin are not available: Health Connect has no stress type. HRV and resting heart rate are the closest signals.'));
+      }
+      sec.append(grid);
+      nodes.push(sec);
+    }
+    const workoutSec = workoutSection(workouts);
+    if (workoutSec) nodes.push(workoutSec);
+
+    if (!nodes.length) {
+      nodes.push(el('p', 'note', 'No data found in this range yet. Make sure your watch or fitness app is writing to Health Connect, then refresh.'));
+    }
+
+    const foot: string[] = [];
+    if (empty.length) foot.push(`No data in this range: ${empty.join(', ')}.`);
+    if (denied.length) foot.push(`Not allowed: ${denied.join(', ')}.`);
+    if (problems.length) foot.push(`Errors: ${problems.join('; ')}`);
+    if (foot.length) {
+      const d = el('details', 'more', undefined, el('summary', undefined, 'Not shown'), ...foot.map((f) => el('p', undefined, f)));
+      nodes.push(d);
+    }
+
+    contentEl.replaceChildren(...nodes);
+    lastExport = { generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts };
+    show($('copy'), true);
+    setStatus(`Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${DEMO ? ' · demo data' : ''}`, 'ok');
+  } finally {
+    delete contentEl.dataset.busy;
+    loading = false;
   }
-  nodes.push(...sleepSection(sleep), ...workoutSection(workouts));
-
-  const foot: string[] = [];
-  if (empty.length) foot.push(`No data in range: ${empty.join(', ')}.`);
-  if (denied.length) foot.push(`Not allowed: ${denied.join(', ')}.`);
-  if (problems.length) foot.push(`Errors: ${problems.join('; ')}`);
-  if (foot.length) nodes.push(el('h2', undefined, 'Not shown'), el('p', 'sub', foot.join(' ')));
-
-  contentEl.replaceChildren(...nodes);
-  lastExport = { generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts };
-  show($('copy'), true);
-  setStatus(`Updated ${now.toLocaleTimeString()}`);
 }
 
 async function afterAuth(readAuthorized: HealthDataType[]) {
   allowed = new Set(readAuthorized);
-  if (!allowed.size) {
-    setStatus('Nothing allowed yet. Tap Connect and allow the data you want to see.');
+  const ready = allowed.size > 0;
+  show($('onboard'), !ready);
+  show($('rangeWrap'), ready);
+  show($('refresh'), ready);
+  if (!ready) {
+    contentEl.replaceChildren();
+    setStatus('Not connected yet', 'idle');
     return false;
   }
-  show($('range'), true);
   await loadAll();
   return true;
 }
 
 async function connect() {
   const status = await Health.requestAuthorization({ read: READ_TYPES, write: [] });
-  await afterAuth(status.readAuthorized);
+  if (!(await afterAuth(status.readAuthorized))) toast('Nothing was allowed. Tap Connect and allow the data you want.');
 }
 
 async function copyJson() {
   const text = JSON.stringify(lastExport, null, 2);
-  jsonEl.value = text;
-  show(jsonEl, true);
   try {
     await navigator.clipboard.writeText(text);
-    setStatus('Copied all data as JSON.');
+    toast('Copied all data as JSON');
   } catch {
+    jsonEl.value = text;
+    show(jsonEl, true);
     jsonEl.select();
-    setStatus('Select the text below and copy it.');
+    toast('Select the text at the bottom and copy it');
   }
 }
 
-const guard = (fn: () => Promise<unknown>) => () => void fn().catch((e) => setStatus(`Error: ${errText(e)}`));
+const guard = (fn: () => Promise<unknown>) => () => {
+  fn().catch((e) => { setStatus(`Error: ${errText(e)}`, 'err'); });
+};
 
 $('connect').addEventListener('click', guard(connect));
 $('refresh').addEventListener('click', guard(loadAll));
@@ -344,16 +528,18 @@ $('range').addEventListener('click', (ev) => {
 });
 
 async function init() {
+  $('date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   const availability = await Health.isAvailable();
   if (!availability.available) {
-    setStatus(availability.reason ?? 'Health Connect is not available on this device.');
+    const note = $('unavailable');
+    note.textContent = availability.reason ?? 'Health Connect is not available on this device.';
+    show(note, true);
+    setStatus('Health Connect unavailable', 'err');
     return;
   }
-  show($('connect'), true);
-  show($('refresh'), true);
   // If permission was already granted on an earlier run, load straight away.
   const status = await Health.checkAuthorization({ read: READ_TYPES, write: [] });
-  if (!(await afterAuth(status.readAuthorized))) setStatus('Health Connect is ready. Tap Connect.');
+  await afterAuth(status.readAuthorized);
 }
 
-void init().catch((e) => setStatus(`Error: ${errText(e)}`));
+void init().catch((e) => setStatus(`Error: ${errText(e)}`, 'err'));

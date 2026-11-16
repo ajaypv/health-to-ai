@@ -38,3 +38,8 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk`. Install with
 Health Connect has no stress-score data type, so stress scores from Samsung Health, Fitbit or Garmin are not
 available to any app. The app shows HRV and resting heart rate, the closest signals Health Connect exposes.
 Which data appears depends on what your watch or phone apps write into Health Connect.
+
+## Previewing on a computer
+
+`npm run dev`, then open `http://localhost:5173/?demo` to see the screen with fake data (add `&fresh` for the
+first-run Connect screen). Demo mode only works in a normal browser, never in the Android app.
