@@ -66,11 +66,30 @@
           <button data-fmt="json" aria-pressed="false">Full JSON</button>
         </div>
         <label class="check"><input type="checkbox" id="withAsk" checked /> <span>Start with a question for the AI</span></label>
+        <label class="check" id="placesRow" hidden><input type="checkbox" id="withPlaces" /> <span>Include places (names and times, no coordinates)</span></label>
         <textarea id="preview" rows="10" spellcheck="false" aria-label="Text to copy"></textarea>
         <p id="previewMeta" class="sub"></p>
         <div class="sheet-actions">
           <button id="copyNow" class="primary">Copy</button>
           <button id="shareNow" class="secondary" hidden>Share…</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="nameSheet" class="sheet" aria-labelledby="nameTitle">
+      <div class="sheet-body">
+        <h2 id="nameTitle">Name this place</h2>
+        <p class="sheet-lead">Visits within about 120 m of here will use this name. Clear the name and save to forget it.</p>
+        <input id="nameInput" type="text" maxlength="40" placeholder="For example Home" autocomplete="off" aria-label="Place name" />
+        <div id="chips" class="chips">
+          <button data-name="Home">Home</button>
+          <button data-name="Work">Work</button>
+          <button data-name="Gym">Gym</button>
+          <button data-name="Cafe">Cafe</button>
+        </div>
+        <div class="sheet-actions">
+          <button id="nameSave" class="primary">Save</button>
+          <button id="nameCancel" class="secondary">Cancel</button>
         </div>
       </div>
     </dialog>

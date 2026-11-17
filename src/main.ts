@@ -8,7 +8,8 @@ import { approxTokens, buildExport } from './export';
 import type { ExportFormat } from './export';
 import { GROUPS, METRICS, fmtDistance, fmtMinutes } from './metrics';
 import type { Metric } from './metrics';
-import type { ExportData, MetricResult, SleepSession } from './types';
+import * as Places from './places';
+import type { ExportData, MetricResult, PlacesExport, SleepSession } from './types';
 
 /** `?demo` in a desktop browser swaps in fake data so the screen can be previewed. Never used on Android. */
 const DEMO = !Capacitor.isNativePlatform() && new URLSearchParams(location.search).has('demo');
@@ -357,6 +358,158 @@ function workoutSection(workouts: Workout[]): HTMLElement | null {
   return sec;
 }
 
+// ---------- places ----------
+const NATIVE = Capacitor.isNativePlatform();
+const unnamed = (n: number) => `Unnamed spot ${n}`;
+
+function rangeFrom(nowMs: number) {
+  return startOfDay(new Date(nowMs - (days - 1) * DAY)).getTime();
+}
+
+function labelRows(rows: Places.Row[]) {
+  let n = 0;
+  return new Map(rows.map((r) => [r.key, r.name ?? unnamed(++n)]));
+}
+
+function placesExport(): PlacesExport | undefined {
+  if (!Places.state.enabled) return undefined;
+  const nowMs = Date.now();
+  const from = rangeFrom(nowMs);
+  const rows = Places.totals(from, nowMs);
+  const labels = labelRows(rows);
+  const labelAt = (name: string | null, lat: number, lon: number) =>
+    name ?? labels.get(rows.find((r) => !r.name && Places.dist(r, { lat, lon }) <= Places.MATCH)?.key ?? '') ?? 'Unnamed spot';
+  const here = Places.now(nowMs);
+  return {
+    note: 'Places come from phone location: stays of 5+ minutes, accurate to a few minutes. Coordinates are not included.',
+    now: here
+      ? { place: here.row ? labels.get(here.row.key) ?? 'Unnamed spot' : 'Unnamed spot', since: new Date(here.since).toISOString(), minutes: Math.round((nowMs - here.since) / 60_000) }
+      : null,
+    totals: rows.map((r) => ({ place: labels.get(r.key)!, minutes: Math.round(r.ms / 60_000), visits: r.visits })),
+    visits: Places.recentVisits(from, nowMs).map((v) => ({
+      place: labelAt(v.place, v.lat, v.lon),
+      start: new Date(v.start).toISOString(),
+      end: new Date(v.end).toISOString(),
+      minutes: Math.round((v.end - v.start) / 60_000),
+    })),
+  };
+}
+
+function placesNode(): HTMLElement {
+  const sec = el('section', 'group');
+  sec.dataset.g = 'places';
+  sec.dataset.places = '1';
+  sec.append(el('h3', undefined, 'Places'));
+
+  if (!Places.state.enabled) {
+    const card = el('div', 'card');
+    card.append(el('div', 'card-head', undefined, icon('📍'), el('span', 'label', 'Where your time goes')));
+    card.append(el('span', 'value', 'Home, work, gym…'));
+    card.append(el('span', 'sub', 'See how long you spend at each place. It runs in the background with a notification, works out places on this phone only, and is accurate to a few minutes.'));
+    const on = el('button', 'primary', 'Turn on place tracking');
+    on.style.marginTop = '12px';
+    on.addEventListener('click', () => { void enablePlaces(); });
+    card.append(on);
+    sec.append(card);
+    return sec;
+  }
+
+  const nowMs = Date.now();
+  const rows = Places.totals(rangeFrom(nowMs), nowMs);
+  const labels = labelRows(rows);
+  const here = Places.now(nowMs);
+
+  const card = el('div', 'card');
+  card.append(el('div', 'card-head', undefined, icon('📍'), el('span', 'label', 'Right now')));
+  if (here) {
+    card.append(el('span', 'value', here.row ? labels.get(here.row.key)! : 'New place'));
+    card.append(el('span', 'sub', `since ${time(new Date(here.since).toISOString())} · ${fmtMinutes((nowMs - here.since) / 60_000)}`));
+  } else {
+    card.append(el('span', 'value', 'On the move'));
+    card.append(el('span', 'sub', 'A place counts once you stay 5 minutes'));
+  }
+  sec.append(card);
+
+  if (rows.length) {
+    const max = rows[0].ms;
+    const list = el('ul', 'list places');
+    for (const r of rows) {
+      const bar = el('i');
+      bar.style.width = `${Math.max(4, (r.ms / max) * 100)}%`;
+      const sub = [`${r.visits} ${r.visits === 1 ? 'visit' : 'visits'}`, r.hint ?? ''].filter(Boolean).join(' · ');
+      const li = el('li', 'tap', undefined,
+        icon(r.name ? '📍' : '❔'),
+        el('div', 'grow', undefined, el('b', undefined, labels.get(r.key)!), el('small', undefined, sub), el('div', 'pbar', undefined, bar)),
+        el('span', 'end', fmtMinutes(r.ms / 60_000)));
+      li.tabIndex = 0;
+      li.setAttribute('role', 'button');
+      li.setAttribute('aria-label', `${labels.get(r.key)}, ${fmtMinutes(r.ms / 60_000)}. ${r.name ? 'Rename' : 'Name'} this place`);
+      li.addEventListener('click', () => openName(r));
+      li.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openName(r); } });
+      list.append(li);
+    }
+    sec.append(list, el('p', 'sub', 'Tap a place to name or rename it.'));
+  } else {
+    sec.append(el('p', 'note', 'No stays of 5 minutes or more in this range yet. Keep the app open in your recent apps and the places will appear as you move around.'));
+  }
+
+  const stop = el('button', 'secondary', 'Stop tracking');
+  stop.addEventListener('click', () => { void Places.stopTracking().then(() => { refreshPlaces(); toast('Place tracking is off'); }); });
+  const wipe = el('button', 'secondary', 'Delete place history');
+  wipe.addEventListener('click', () => {
+    if (!window.confirm('Delete all saved places and visit history from this phone?')) return;
+    Places.clearAll();
+    refreshPlaces();
+  });
+  const row = el('div', 'sheet-actions', undefined, stop, wipe);
+  sec.append(el('details', 'more', undefined, el('summary', undefined, 'Place tracking settings'), row));
+  return sec;
+}
+
+function refreshPlaces() {
+  contentEl.querySelector('[data-places]')?.replaceWith(placesNode());
+  if (lastExport) lastExport.places = placesExport();
+}
+
+async function enablePlaces() {
+  if (!NATIVE && !DEMO) {
+    toast('Place tracking only works in the Android app.');
+    return;
+  }
+  try {
+    await Places.startTracking(refreshPlaces, (m) => toast(m));
+    toast('Place tracking is on. Keep the app in your recent apps.');
+  } catch (e) {
+    toast(`Could not start: ${errText(e)}`);
+  }
+  refreshPlaces();
+}
+
+const nameDialog = $<HTMLDialogElement>('nameSheet');
+const nameInput = $<HTMLInputElement>('nameInput');
+let nameTarget: { place: Places.Place | null; lat: number; lon: number } | null = null;
+
+function openName(r: Places.Row) {
+  nameTarget = { place: r.place, lat: r.lat, lon: r.lon };
+  nameInput.value = r.name ?? '';
+  $('nameTitle').textContent = r.name ? 'Rename place' : 'Name this place';
+  nameDialog.showModal();
+}
+
+function saveNameNow() {
+  if (nameTarget) Places.saveName(nameTarget, nameInput.value);
+  nameDialog.close();
+  refreshPlaces();
+}
+
+$('nameSave').addEventListener('click', saveNameNow);
+$('nameCancel').addEventListener('click', () => nameDialog.close());
+nameInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') saveNameNow(); });
+$('chips').addEventListener('click', (ev) => {
+  const chip = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-name]');
+  if (chip) nameInput.value = chip.dataset.name ?? '';
+});
+
 function skeleton(): Node[] {
   const grid = el('div', 'grid');
   grid.append(el('div', 'skel tall'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'));
@@ -415,6 +568,7 @@ async function loadAll() {
     if (hero) nodes.push(hero);
     const sleepSec = sleepSection(sleep);
     if (sleepSec) nodes.push(sleepSec);
+    nodes.push(placesNode());
 
     for (const g of GROUPS) {
       const rs = withData.filter((r) => r.group === g);
@@ -447,7 +601,7 @@ async function loadAll() {
     }
 
     contentEl.replaceChildren(...nodes);
-    lastExport = { source: 'Android Health Connect', generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts };
+    lastExport = { source: 'Android Health Connect', generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts, places: placesExport() };
     show($('copy'), true);
     setStatus(`Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${DEMO ? ' · demo data' : ''}`, 'ok');
   } finally {
@@ -482,11 +636,12 @@ const preview = $<HTMLTextAreaElement>('preview');
 const copyBtn = $<HTMLButtonElement>('copyNow');
 const shareBtn = $<HTMLButtonElement>('shareNow');
 const askBox = $<HTMLInputElement>('withAsk');
+const placesBox = $<HTMLInputElement>('withPlaces');
 let format: ExportFormat = 'text';
 
 function fillPreview() {
   if (!lastExport) return;
-  preview.value = buildExport(lastExport, format, askBox.checked);
+  preview.value = buildExport(lastExport, format, { ask: askBox.checked, places: placesBox.checked && !!lastExport.places });
   const wordCount = preview.value.split(/\s+/).filter(Boolean).length;
   $('previewMeta').textContent = `About ${approxTokens(preview.value).toLocaleString()} tokens, ${wordCount.toLocaleString()} words. You can edit the text before copying.`;
   for (const b of $('fmt').querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-pressed', String(b.dataset.fmt === format));
@@ -496,6 +651,8 @@ function openSheet() {
   if (!lastExport) return;
   $('sheetRange').textContent = lastExport.rangeDays === 1 ? 'today' : `the last ${lastExport.rangeDays} days`;
   copyBtn.textContent = 'Copy';
+  lastExport.places = placesExport();
+  $('placesRow').hidden = !lastExport.places;
   fillPreview();
   sheet.showModal();
   preview.scrollTop = 0;
@@ -534,6 +691,7 @@ $('copy').addEventListener('click', openSheet);
 $('sheetClose').addEventListener('click', () => sheet.close());
 sheet.addEventListener('click', (ev) => { if (ev.target === sheet) sheet.close(); });
 askBox.addEventListener('change', fillPreview);
+placesBox.addEventListener('change', fillPreview);
 $('fmt').addEventListener('click', (ev) => {
   const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-fmt]');
   if (!btn) return;
@@ -561,6 +719,13 @@ $('range').addEventListener('click', (ev) => {
 
 async function init() {
   $('date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  if (DEMO) Places.seedDemo();
+  else {
+    Places.load();
+    // Resume tracking after the app was closed. Needs the app in the foreground, which it is right now.
+    if (Places.state.enabled && NATIVE) void Places.startTracking(refreshPlaces, (m) => toast(m)).catch(() => { /* shown as off */ });
+    else if (!NATIVE) Places.state.enabled = false;
+  }
   const availability = await Health.isAvailable();
   if (!availability.available) {
     const note = $('unavailable');

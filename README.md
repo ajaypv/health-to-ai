@@ -16,6 +16,19 @@ until you paste it somewhere.
    - Optionally start with a ready-made question ("act as a careful health coach..."). The text is editable.
 4. Tap **Copy** and paste into your AI app, or tap **Share** to send it straight to an installed AI app.
 
+## Places (where you spend your time)
+
+Optional. Tap **Turn on place tracking** in the Places section. The app records your location in the background
+(Android shows a notification while it runs), groups it into **visits** of 5 minutes or more, and adds up the time
+per place for Today, 7 days or 30 days.
+
+- Everything is worked out on the phone. There is no address lookup and nothing is uploaded.
+- Places start as "Unnamed spot". Tap one to name it (Home, Work, Gym...). Later visits nearby use the name.
+- Accuracy: the start and end of a visit are within a few minutes. Fixes less precise than 60 m are ignored,
+  one jumpy fix does not end a visit, and a brief hop away and back is merged into one visit.
+- Keep the app in your recent apps. If you swipe it away or restart the phone, tracking stops until you open it again.
+- In **Copy for AI**, tick **Include places** to add names and times. Coordinates are never copied.
+
 ## Install
 
 Download the APK from the [latest release](../../releases/latest) and open it on your phone

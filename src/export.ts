@@ -102,6 +102,18 @@ function summary(data: ExportData): string {
     }
   }
 
+  const pl = data.places;
+  if (pl) {
+    out.push('', '## Places (where I spent my time)');
+    if (pl.now) out.push(`- Right now: at ${pl.now.place} since ${clock(pl.now.since)} (${fmtMinutes(pl.now.minutes)})`);
+    for (const t of pl.totals) out.push(`- ${t.place}: ${fmtMinutes(t.minutes)} over ${t.visits} ${t.visits === 1 ? 'visit' : 'visits'}`);
+    if (pl.visits.length) {
+      out.push('- Visits:');
+      for (const v of pl.visits) out.push(`  - ${dayLabel(new Date(v.start))} ${clock(v.start)} to ${clock(v.end)}: ${v.place} (${fmtMinutes(v.minutes)})`);
+    }
+    out.push(`- ${pl.note}`);
+  }
+
   const empty = data.metrics.filter((r) => !hasData(r)).map((r) => r.label);
   out.push('', '## Notes');
   if (empty.length) out.push(`- No data in this range: ${empty.join(', ')}.`);
@@ -109,9 +121,12 @@ function summary(data: ExportData): string {
   return out.join('\n');
 }
 
-export function buildExport(data: ExportData, format: ExportFormat, withAsk: boolean): string {
+export interface ExportOptions { ask: boolean; places: boolean }
+
+export function buildExport(source: ExportData, format: ExportFormat, opts: ExportOptions): string {
+  const data = opts.places ? source : { ...source, places: undefined };
   const body = format === 'json' ? JSON.stringify(data, null, 1) : summary(data);
-  if (!withAsk) return body;
+  if (!opts.ask) return body;
   return `${format === 'json' ? ASK_JSON : ASK_TEXT}\n\n${body}`;
 }
 

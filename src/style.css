@@ -16,6 +16,7 @@
   --nutrition: #16a34a;
   --sleep: #8b5cf6;
   --workout: #0d9488;
+  --places: #0ea5e9;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -176,6 +177,19 @@ details.more p { margin: 8px 0 0; line-height: 1.5; }
 .sheet-actions .primary { flex: 1; width: auto; }
 .secondary { min-height: 52px; padding: 0 20px; border: 0; border-radius: 16px; background: var(--surface-2); color: var(--text); font-weight: 700; font-size: 1rem; }
 .secondary:active { transform: scale(0.98); }
+
+/* places */
+.group[data-g='places'] { --c: var(--places); }
+.list .tap { cursor: pointer; }
+.list .tap:active { opacity: 0.6; }
+.pbar { height: 6px; margin-top: 8px; border-radius: 99px; background: color-mix(in srgb, var(--c) 16%, transparent); overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 99px; background: var(--c); }
+.card .primary { min-height: 48px; }
+details.more .sheet-actions { margin-top: 10px; }
+details.more .secondary { min-height: 44px; flex: 1; font-size: 0.88rem; }
+.sheet input[type='text'] { width: 100%; min-height: 52px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 1rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 99px; background: var(--surface-2); color: var(--text); font-weight: 600; }
 
 textarea { width: 100%; margin-top: 16px; padding: 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 0.72rem/1.45 ui-monospace, monospace; }
 

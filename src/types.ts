@@ -28,6 +28,15 @@ export interface SleepSession {
   source?: string;
 }
 
+/** Time at places. Names and times only: coordinates are never exported. */
+export interface PlacesExport {
+  note: string;
+  /** a stay in progress, if any */
+  now: { place: string; since: string; minutes: number } | null;
+  totals: { place: string; minutes: number; visits: number }[];
+  visits: { place: string; start: string; end: string; minutes: number }[];
+}
+
 /** Everything the app read, in the shape that is copied out as JSON. */
 export interface ExportData {
   source: string;
@@ -36,4 +45,5 @@ export interface ExportData {
   metrics: MetricResult[];
   sleep: SleepSession[];
   workouts: Workout[];
+  places?: PlacesExport;
 }
