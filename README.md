@@ -1,45 +1,59 @@
-# Activity POC
+# Health to AI
 
-Capacitor app that reads today's steps, walking distance and last night's sleep from
-Android **Health Connect**. Uses the free, open-source (MPL-2.0)
-[`@capgo/capacitor-health`](https://github.com/Cap-go/capacitor-health) plugin.
+Copy your Android **Health Connect** data and paste it into any AI agent (ChatGPT, Claude, Gemini, anything
+that takes text). Steps, sleep, heart rate, HRV, workouts, weight, nutrition and more, in one tap.
 
-## Build
+No account, no server, no cloud. The data goes from Health Connect to your clipboard and stays on your phone
+until you paste it somewhere.
 
-Needs Node, a JDK 21 and the Android SDK (set `sdk.dir` in `android/local.properties`).
+## How it works
+
+1. Open the app, tap **Connect Health Connect** and allow the data you want.
+2. Pick **Today**, **7 days** or **30 days**.
+3. Tap **Copy for AI**, then choose:
+   - **Readable summary**: short text that is cheap for a chat to read (recommended).
+   - **Full JSON**: every reading, for tools and scripts.
+   - Optionally start with a ready-made question ("act as a careful health coach..."). The text is editable.
+4. Tap **Copy** and paste into your AI app, or tap **Share** to send it straight to an installed AI app.
+
+## Install
+
+Download the APK from the [latest release](../../releases/latest) and open it on your phone
+(allow "install unknown apps" for your browser or file manager). Android 8+ (API 26).
+
+- Android 14+ has Health Connect built in. On Android 9 to 13 install "Health Connect" from the Play Store.
+- Make sure a fitness app (Samsung Health, Fitbit, Google Fit, a watch app) writes data into Health Connect.
+- The release APK is debug-signed, so it is for personal use, not for the Play Store.
+
+## Build it yourself
+
+Needs Node, JDK 21 and the Android SDK (set `sdk.dir` in `android/local.properties`).
 
 ```bash
 npm install
-npm run build            # type-check + bundle web app into dist/
+npm run build            # type-check + bundle the web app into dist/
 npx cap sync android     # copy dist/ and plugins into the Android project
 cd android && gradlew.bat assembleDebug
 ```
 
-APK: `android/app/build/outputs/apk/debug/app-debug.apk`. Install with
-`adb install -r app-debug.apk`, or `npx cap run android` with a device attached.
+APK: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-## On the phone
-
-1. Android 14+ has Health Connect built in. On Android 9-13 install "Health Connect" from the Play Store.
-2. Make sure a fitness app (Google Fit, Samsung Health, Fitbit, a watch app) writes steps and sleep into Health Connect.
-3. Open the app, tap **Connect Health Connect** and allow the data types you want (allow all to see everything).
-
-## Notes
-
-- Sleep can't be aggregated by the plugin, so it is read as sessions from the last 36 hours.
-- By default Health Connect only returns the last 30 days. For older data add
-  `READ_HEALTH_DATA_HISTORY` and call `requestAuthorization({ requestHistoryAccess: true })`.
-- `public/privacypolicy.html` is shown when the user taps the permission rationale. Replace it with a real
-  policy before publishing to the Play Store.
-- Change `appId` in `capacitor.config.ts` before publishing.
-
-## Stress
-
-Health Connect has no stress-score data type, so stress scores from Samsung Health, Fitbit or Garmin are not
-available to any app. The app shows HRV and resting heart rate, the closest signals Health Connect exposes.
-Which data appears depends on what your watch or phone apps write into Health Connect.
-
-## Previewing on a computer
+## Preview on a computer
 
 `npm run dev`, then open `http://localhost:5173/?demo` to see the screen with fake data (add `&fresh` for the
 first-run Connect screen). Demo mode only works in a normal browser, never in the Android app.
+
+## Notes
+
+- Uses the free, open-source (MPL-2.0) [`@capgo/capacitor-health`](https://github.com/Cap-go/capacitor-health) plugin.
+- Health Connect has no stress-score type, so stress scores from Samsung Health, Fitbit or Garmin are not
+  available to any app. The app includes HRV and resting heart rate, the closest signals.
+- By default Health Connect only returns the last 30 days. Older data needs `READ_HEALTH_DATA_HISTORY`.
+- `public/privacypolicy.html` is shown when the permission rationale is opened. Replace it with a real policy
+  and change `appId` in `capacitor.config.ts` before any Play Store release.
+- Health data is sensitive. Pasting it into an AI service sends it to that service, so check its privacy terms.
+  This is not medical advice.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

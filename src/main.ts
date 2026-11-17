@@ -1,9 +1,14 @@
+import { Clipboard } from '@capacitor/clipboard';
 import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
 import { Health as NativeHealth } from '@capgo/capacitor-health';
 import type { HealthDataType, HealthSample, SleepStage, Workout } from '@capgo/capacitor-health';
 import { demoHealth } from './demo';
+import { approxTokens, buildExport } from './export';
+import type { ExportFormat } from './export';
 import { GROUPS, METRICS, fmtDistance, fmtMinutes } from './metrics';
 import type { Metric } from './metrics';
+import type { ExportData, MetricResult, SleepSession } from './types';
 
 /** `?demo` in a desktop browser swaps in fake data so the screen can be previewed. Never used on Android. */
 const DEMO = !Capacitor.isNativePlatform() && new URLSearchParams(location.search).has('demo');
@@ -12,7 +17,6 @@ const Health = (DEMO ? demoHealth : NativeHealth) as typeof NativeHealth;
 // ---------- small helpers ----------
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const contentEl = $('content');
-const jsonEl = $<HTMLTextAreaElement>('json');
 const show = (e: HTMLElement, on: boolean) => { e.hidden = !on; };
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -45,7 +49,7 @@ const DAY = 86_400_000;
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const dayKey = (d: Date | string) => {
   const x = typeof d === 'string' ? new Date(d) : d;
-  return `${x.getFullYear()}-${x.getMonth() + 1}-${x.getDate()}`;
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const dateTime = (iso: string) =>
@@ -75,33 +79,6 @@ async function pool<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>)
 }
 
 // ---------- reading data ----------
-interface MetricResult {
-  id: HealthDataType;
-  label: string;
-  group: Metric['group'];
-  kind: Metric['kind'];
-  count: number;
-  /** sum metrics: total per local day, and today's total */
-  daily?: { date: string; value: number }[];
-  today?: number;
-  /** stat/latest metrics */
-  latest?: { value: number; text?: string; at: string; source?: string };
-  avg?: number;
-  min?: number;
-  max?: number;
-  /** heart rate only: average bpm per hour of today (index = hour, null = no data) */
-  hourly?: (number | null)[];
-}
-
-interface SleepSession {
-  start: string;
-  end: string;
-  totalMinutes: number;
-  asleepMinutes: number;
-  stages: Record<string, number>;
-  source?: string;
-}
-
 const iso = (d: Date) => d.toISOString();
 
 async function aggDaily(id: HealthDataType, from: Date, to: Date) {
@@ -390,7 +367,7 @@ function skeleton(): Node[] {
 const READ_TYPES: HealthDataType[] = [...METRICS.map((m) => m.id), 'sleep', 'workouts'];
 let days = 1;
 let allowed = new Set<HealthDataType>();
-let lastExport: unknown = null;
+let lastExport: ExportData | null = null;
 let loading = false;
 
 async function loadAll() {
@@ -470,7 +447,7 @@ async function loadAll() {
     }
 
     contentEl.replaceChildren(...nodes);
-    lastExport = { generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts };
+    lastExport = { source: 'Android Health Connect', generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts };
     show($('copy'), true);
     setStatus(`Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${DEMO ? ' · demo data' : ''}`, 'ok');
   } finally {
@@ -499,18 +476,74 @@ async function connect() {
   if (!(await afterAuth(status.readAuthorized))) toast('Nothing was allowed. Tap Connect and allow the data you want.');
 }
 
-async function copyJson() {
-  const text = JSON.stringify(lastExport, null, 2);
+// ---------- copy for an AI agent ----------
+const sheet = $<HTMLDialogElement>('sheet');
+const preview = $<HTMLTextAreaElement>('preview');
+const copyBtn = $<HTMLButtonElement>('copyNow');
+const shareBtn = $<HTMLButtonElement>('shareNow');
+const askBox = $<HTMLInputElement>('withAsk');
+let format: ExportFormat = 'text';
+
+function fillPreview() {
+  if (!lastExport) return;
+  preview.value = buildExport(lastExport, format, askBox.checked);
+  const wordCount = preview.value.split(/\s+/).filter(Boolean).length;
+  $('previewMeta').textContent = `About ${approxTokens(preview.value).toLocaleString()} tokens, ${wordCount.toLocaleString()} words. You can edit the text before copying.`;
+  for (const b of $('fmt').querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-pressed', String(b.dataset.fmt === format));
+}
+
+function openSheet() {
+  if (!lastExport) return;
+  $('sheetRange').textContent = lastExport.rangeDays === 1 ? 'today' : `the last ${lastExport.rangeDays} days`;
+  copyBtn.textContent = 'Copy';
+  fillPreview();
+  sheet.showModal();
+  preview.scrollTop = 0;
+}
+
+async function copyNow() {
+  let ok = false;
   try {
-    await navigator.clipboard.writeText(text);
-    toast('Copied all data as JSON');
+    // The native clipboard is the most reliable inside the Android WebView; browsers use the web API.
+    if (Capacitor.isNativePlatform()) await Clipboard.write({ string: preview.value });
+    else await navigator.clipboard.writeText(preview.value);
+    ok = true;
   } catch {
-    jsonEl.value = text;
-    show(jsonEl, true);
-    jsonEl.select();
-    toast('Select the text at the bottom and copy it');
+    preview.focus();
+    preview.select();
+    try { ok = document.execCommand('copy'); } catch { /* fall through */ }
+  }
+  if (ok) {
+    copyBtn.textContent = 'Copied ✓';
+    toast('Copied. Paste it into your AI app.');
+  } else {
+    toast('Could not copy. Press and hold the text, then choose Copy.');
   }
 }
+
+async function shareNow() {
+  try {
+    await Share.share({ title: 'My health data', text: preview.value, dialogTitle: 'Send to an AI app' });
+  } catch (e) {
+    // Closing the share sheet counts as a cancel, not an error.
+    if (!/cancel/i.test(errText(e))) toast(`Could not share: ${errText(e)}`);
+  }
+}
+
+$('copy').addEventListener('click', openSheet);
+$('sheetClose').addEventListener('click', () => sheet.close());
+sheet.addEventListener('click', (ev) => { if (ev.target === sheet) sheet.close(); });
+askBox.addEventListener('change', fillPreview);
+$('fmt').addEventListener('click', (ev) => {
+  const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-fmt]');
+  if (!btn) return;
+  format = btn.dataset.fmt as ExportFormat;
+  copyBtn.textContent = 'Copy';
+  fillPreview();
+});
+copyBtn.addEventListener('click', () => { void copyNow(); });
+shareBtn.addEventListener('click', () => { void shareNow(); });
+void Share.canShare().then((r) => { shareBtn.hidden = !r.value; }).catch(() => { /* no share sheet here */ });
 
 const guard = (fn: () => Promise<unknown>) => () => {
   fn().catch((e) => { setStatus(`Error: ${errText(e)}`, 'err'); });
@@ -518,7 +551,6 @@ const guard = (fn: () => Promise<unknown>) => () => {
 
 $('connect').addEventListener('click', guard(connect));
 $('refresh').addEventListener('click', guard(loadAll));
-$('copy').addEventListener('click', guard(copyJson));
 $('range').addEventListener('click', (ev) => {
   const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-days]');
   if (!btn) return;
@@ -528,7 +560,7 @@ $('range').addEventListener('click', (ev) => {
 });
 
 async function init() {
-  $('date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  $('date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   const availability = await Health.isAvailable();
   if (!availability.available) {
     const note = $('unavailable');

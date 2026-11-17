@@ -19,8 +19,9 @@
           <button id="refresh" class="icon-btn" aria-label="Refresh" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
           </button>
-          <button id="copy" class="icon-btn" aria-label="Copy all data as JSON" hidden>
+          <button id="copy" class="pill-btn" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></svg>
+            <span>Copy for AI</span>
           </button>
         </div>
       </header>
@@ -49,8 +50,30 @@
 
       <main id="content"></main>
 
-      <textarea id="json" hidden readonly rows="8" aria-label="JSON export"></textarea>
     </div>
+
+    <dialog id="sheet" class="sheet" aria-labelledby="sheetTitle">
+      <div class="sheet-body">
+        <div class="sheet-head">
+          <h2 id="sheetTitle">Copy for an AI agent</h2>
+          <button id="sheetClose" class="icon-btn" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <p class="sheet-lead">Paste this into ChatGPT, Claude, Gemini or any other agent. It covers <b id="sheetRange"></b>.</p>
+        <div id="fmt" class="seg" role="group" aria-label="Format">
+          <button data-fmt="text" aria-pressed="true">Readable summary</button>
+          <button data-fmt="json" aria-pressed="false">Full JSON</button>
+        </div>
+        <label class="check"><input type="checkbox" id="withAsk" checked /> <span>Start with a question for the AI</span></label>
+        <textarea id="preview" rows="10" spellcheck="false" aria-label="Text to copy"></textarea>
+        <p id="previewMeta" class="sub"></p>
+        <div class="sheet-actions">
+          <button id="copyNow" class="primary">Copy</button>
+          <button id="shareNow" class="secondary" hidden>Share…</button>
+        </div>
+      </div>
+    </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

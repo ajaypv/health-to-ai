@@ -1,7 +1,7 @@
 {
-  "name": "health-activity-poc",
+  "name": "health-to-ai",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,9 @@
     "run:android": "npm run sync && cap run android"
   },
   "dependencies": {
+    "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.6.2",
+    "@capacitor/share": "^8.0.3",
     "@capgo/capacitor-health": "^8.13.0"
   },
   "devDependencies": {

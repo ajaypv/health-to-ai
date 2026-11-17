@@ -157,7 +157,27 @@ details.more p { margin: 8px 0 0; line-height: 1.5; }
 @keyframes shimmer { to { background-position: -150% 0; } }
 #content[data-busy='true'] { opacity: 0.55; transition: opacity 0.15s; pointer-events: none; }
 
-textarea { width: 100%; margin-top: 16px; padding: 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 0.7rem ui-monospace, monospace; }
+.pill-btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 12px; border: 0; border-radius: 14px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 0.9rem; box-shadow: var(--shadow); white-space: nowrap; }
+.pill-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pill-btn:active { transform: scale(0.96); }
+
+/* copy-for-AI sheet */
+.sheet { width: 100%; max-width: 560px; max-height: 92dvh; margin: auto auto 0; padding: 0; border: 0; border-radius: 28px 28px 0 0; background: var(--bg); color: var(--text); overflow: auto; box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.25); }
+.sheet::backdrop { background: rgba(8, 10, 20, 0.55); }
+.sheet-body { display: grid; gap: 12px; padding: 18px 16px calc(env(safe-area-inset-bottom) + 18px); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sheet-head h2 { font-size: 1.2rem; letter-spacing: -0.01em; }
+.sheet-lead { margin: 0; font-size: 0.88rem; line-height: 1.45; color: var(--muted); }
+.sheet-lead b { color: var(--text); }
+.check { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; min-height: 32px; }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.sheet textarea { margin: 0; min-height: 200px; resize: vertical; }
+.sheet-actions { display: flex; gap: 10px; }
+.sheet-actions .primary { flex: 1; width: auto; }
+.secondary { min-height: 52px; padding: 0 20px; border: 0; border-radius: 16px; background: var(--surface-2); color: var(--text); font-weight: 700; font-size: 1rem; }
+.secondary:active { transform: scale(0.98); }
+
+textarea { width: 100%; margin-top: 16px; padding: 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 0.72rem/1.45 ui-monospace, monospace; }
 
 #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px); transform: translate(-50%, 20px); padding: 12px 18px; border-radius: 99px; background: var(--text); color: var(--bg); font-size: 0.88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; max-width: 90vw; text-align: center; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
