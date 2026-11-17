@@ -29,6 +29,26 @@ per place for Today, 7 days or 30 days.
 - Keep the app in your recent apps. If you swipe it away or restart the phone, tracking stops until you open it again.
 - In **Copy for AI**, tick **Include places** to add names and times. Coordinates are never copied.
 
+## Food and calories (Gemini)
+
+Optional. In the **Food** section tap **Add food**, then either:
+
+- **Photo**: take or choose a picture of your meal (add a note like "2 rotis" if you like). Gemini identifies the food,
+  guesses the portion and returns calories, protein, carbs and fat per item.
+- **Search the web**: type what you ate ("2 dosa with sambar", a restaurant dish, a packaged food). Gemini searches
+  Google and uses the figures it finds, and the sources are listed.
+
+You can edit the numbers before adding the meal to your food log. The log shows today's total, the 7 and 30 day
+view, and is included in **Copy for AI**.
+
+Setup: create a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it when the app
+asks. The key is saved only on the phone (never in this repo). The model is chosen automatically from what your key
+can use; you can type a model name next to the key to override it.
+
+- Photos and text you add are sent to Google. On the free tier Google may use them to improve its products,
+  so check Google's terms, and do not photograph anything private.
+- Estimates are approximate, especially portion size. They are not medical or dietary advice.
+
 ## Install
 
 Download the APK from the [latest release](../../releases/latest) and open it on your phone

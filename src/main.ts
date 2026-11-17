@@ -8,8 +8,11 @@ import { approxTokens, buildExport } from './export';
 import type { ExportFormat } from './export';
 import { GROUPS, METRICS, fmtDistance, fmtMinutes } from './metrics';
 import type { Metric } from './metrics';
+import * as Food from './food';
+import { GeminiError, apiKey, demoEstimate, estimateFromPhoto, estimateFromSearch, modelOverride, photoToJpeg } from './gemini';
+import type { FoodEstimate } from './gemini';
 import * as Places from './places';
-import type { ExportData, MetricResult, PlacesExport, SleepSession } from './types';
+import type { ExportData, FoodExport, MetricResult, PlacesExport, SleepSession } from './types';
 
 /** `?demo` in a desktop browser swaps in fake data so the screen can be previewed. Never used on Android. */
 const DEMO = !Capacitor.isNativePlatform() && new URLSearchParams(location.search).has('demo');
@@ -510,6 +513,232 @@ $('chips').addEventListener('click', (ev) => {
   if (chip) nameInput.value = chip.dataset.name ?? '';
 });
 
+// ---------- food (calories from a photo or web search) ----------
+const r0 = (v: number) => Math.round(v).toLocaleString();
+
+function foodExport(): FoodExport | undefined {
+  const nowMs = Date.now();
+  const list = Food.inRange(rangeFrom(nowMs), nowMs);
+  if (!list.length) return undefined;
+  const byDay = new Map<string, Food.FoodEntry[]>();
+  for (const e of list) {
+    const k = dayKey(new Date(e.at));
+    byDay.set(k, [...(byDay.get(k) ?? []), e]);
+  }
+  return {
+    note: 'Calories and macros are AI estimates from photos or web search, so treat them as approximate.',
+    byDay: [...byDay].map(([date, es]) => ({ date, ...Food.totalsOf(es) })),
+    meals: list.map((e) => ({ at: new Date(e.at).toISOString(), name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat, source: e.source })),
+  };
+}
+
+function foodNode(): HTMLElement {
+  const sec = el('section', 'group');
+  sec.dataset.g = 'food';
+  sec.dataset.food = '1';
+  sec.append(el('h3', undefined, 'Food'));
+
+  const nowMs = Date.now();
+  const list = Food.inRange(rangeFrom(nowMs), nowMs);
+  const todayList = Food.inRange(startOfDay(new Date(nowMs)).getTime(), nowMs);
+  const t = Food.totalsOf(todayList);
+
+  const card = el('div', 'card');
+  card.append(el('div', 'card-head', undefined, icon('🍽️'), el('span', 'label', 'Calories logged today')));
+  card.append(valueEl(`${r0(t.kcal)} kcal`));
+  card.append(el('span', 'sub', todayList.length ? `Protein ${r0(t.protein)} g · Carbs ${r0(t.carbs)} g · Fat ${r0(t.fat)} g` : 'Nothing logged yet today'));
+  if (days > 1) {
+    const per = new Map<string, number>();
+    for (const e of list) per.set(dayKey(new Date(e.at)), (per.get(dayKey(new Date(e.at))) ?? 0) + e.kcal);
+    const vals = Array.from({ length: days }, (_, i) => per.get(dayKey(new Date(nowMs - (days - 1 - i) * DAY))) ?? 0);
+    const logged = vals.filter((v) => v > 0);
+    if (logged.length) card.append(el('span', 'sub', `average ${r0(logged.reduce((a, b) => a + b, 0) / logged.length)} kcal on days you logged`));
+    card.append(bars(vals));
+  }
+  const add = el('button', 'primary', 'Add food: photo or search');
+  add.style.marginTop = '12px';
+  add.addEventListener('click', () => openFood(false));
+  card.append(add);
+  sec.append(card);
+
+  if (list.length) {
+    const ul = el('ul', 'list');
+    for (const e of [...list].reverse().slice(0, 20)) {
+      const del = el('button', 'x', '✕');
+      del.setAttribute('aria-label', `Delete ${e.name}`);
+      del.addEventListener('click', () => { Food.removeFood(e.id); refreshFood(); });
+      ul.append(
+        el('li', 'ent', undefined,
+          icon(e.source === 'photo' ? '📷' : '🔎'),
+          el('div', 'grow', undefined, el('b', undefined, e.name), el('small', undefined, `${dateTime(new Date(e.at).toISOString())} · P ${r0(e.protein)} · C ${r0(e.carbs)} · F ${r0(e.fat)} g`)),
+          el('span', 'end', `${r0(e.kcal)} kcal`),
+          del),
+      );
+    }
+    sec.append(ul);
+  }
+
+  const keyRow = el('div', 'sheet-actions');
+  const change = el('button', 'secondary', apiKey.get() ? 'Change key' : 'Add Gemini key');
+  change.addEventListener('click', () => openFood(true));
+  keyRow.append(change);
+  if (apiKey.get()) {
+    const rm = el('button', 'secondary', 'Remove key');
+    rm.addEventListener('click', () => { apiKey.clear(); refreshFood(); toast('Key removed from this phone'); });
+    keyRow.append(rm);
+  }
+  sec.append(el('details', 'more', undefined, el('summary', undefined, 'Food settings'),
+    el('p', undefined, 'Calories are estimated by Google Gemini with your own free API key, saved only on this phone. Estimates are approximate.'), keyRow));
+  return sec;
+}
+
+function refreshFood() {
+  contentEl.querySelector('[data-food]')?.replaceWith(foodNode());
+  if (lastExport) lastExport.food = foodExport();
+}
+
+const foodDialog = $<HTMLDialogElement>('foodSheet');
+const foodText = $<HTMLInputElement>('foodText');
+const foodGo = $<HTMLButtonElement>('foodGo');
+const foodMsg = $('foodMsg');
+const foodImg = $<HTMLImageElement>('foodImg');
+let foodMode: 'photo' | 'search' = 'photo';
+let photo: { base64: string; dataUrl: string } | null = null;
+let estimate: FoodEstimate | null = null;
+
+function setFoodMode(m: 'photo' | 'search') {
+  foodMode = m;
+  for (const b of $('foodMode').querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
+  show($('photoPane'), m === 'photo');
+  foodText.placeholder = m === 'photo' ? 'Optional note, for example: 2 rotis, small bowl of dal' : 'What did you eat? For example: 2 dosa with sambar';
+  foodGo.textContent = m === 'photo' ? 'Estimate from photo' : 'Search calories';
+}
+
+function showKeyBox(on: boolean) {
+  show($('keyBox'), on);
+  show($('foodMain'), !on);
+  if (on) {
+    $<HTMLInputElement>('keyInput').value = '';
+    $<HTMLInputElement>('modelInput').value = modelOverride.get();
+  }
+}
+
+function openFood(forceKey: boolean) {
+  photo = null;
+  estimate = null;
+  foodImg.hidden = true;
+  foodText.value = '';
+  foodMsg.textContent = '';
+  show($('foodResult'), false);
+  setFoodMode('photo');
+  showKeyBox(forceKey || (!DEMO && !apiKey.get()));
+  foodDialog.showModal();
+}
+
+async function onPhoto(input: HTMLInputElement) {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  foodMsg.textContent = 'Preparing photo…';
+  try {
+    photo = await photoToJpeg(file);
+    foodImg.src = photo.dataUrl;
+    foodImg.hidden = false;
+    show($('foodResult'), false);
+    foodMsg.textContent = 'Add a note if you like, then tap Estimate.';
+  } catch (e) {
+    photo = null;
+    foodMsg.textContent = errText(e);
+  }
+}
+
+function fillResult(est: FoodEstimate) {
+  estimate = est;
+  $<HTMLInputElement>('fName').value = est.name;
+  $<HTMLInputElement>('fKcal').value = String(Math.round(est.calories));
+  $<HTMLInputElement>('fProt').value = String(Math.round(est.protein));
+  $<HTMLInputElement>('fCarb').value = String(Math.round(est.carbs));
+  $<HTMLInputElement>('fFat').value = String(Math.round(est.fat));
+  const ul = $('fItems');
+  ul.replaceChildren(...est.items.map((i) => el('li', undefined, undefined,
+    el('div', 'grow', undefined, el('b', undefined, i.name), el('small', undefined, [i.portion, `P ${r0(i.protein)} · C ${r0(i.carbs)} · F ${r0(i.fat)} g`].filter(Boolean).join(' · '))),
+    el('span', 'end', `${r0(i.calories)} kcal`))));
+  ul.hidden = est.items.length === 0;
+  $('fMeta').textContent = `Confidence: ${est.confidence}.${est.notes ? ` ${est.notes}` : ''} You can edit the numbers before adding.`;
+  const src = $('fSources');
+  src.replaceChildren();
+  if (est.sources.length) {
+    src.append('Sources: ');
+    est.sources.slice(0, 4).forEach((s, i) => {
+      const a = el('a', undefined, s.title.slice(0, 40));
+      a.href = s.uri;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      src.append(...(i ? [', '] : []), a);
+    });
+  }
+  show($('foodResult'), true);
+}
+
+async function runEstimate() {
+  const text = foodText.value.trim();
+  if (foodMode === 'photo' && !photo) { foodMsg.textContent = 'Take or choose a photo first.'; return; }
+  if (foodMode === 'search' && !text) { foodMsg.textContent = 'Type what you ate first.'; return; }
+  const key = apiKey.get();
+  if (!DEMO && !key) { showKeyBox(true); return; }
+
+  foodGo.disabled = true;
+  foodMsg.textContent = foodMode === 'photo' ? 'Looking at your food…' : 'Searching the web…';
+  show($('foodResult'), false);
+  try {
+    const est = DEMO
+      ? await demoEstimate(foodMode === 'search', text)
+      : foodMode === 'photo' ? await estimateFromPhoto(key, photo!.base64, text) : await estimateFromSearch(key, text);
+    fillResult(est);
+    foodMsg.textContent = '';
+  } catch (e) {
+    foodMsg.textContent = errText(e);
+    if (e instanceof GeminiError && (e.status === 400 || e.status === 403)) showKeyBox(true);
+  } finally {
+    foodGo.disabled = false;
+  }
+}
+
+function addToLog() {
+  const num = (id: string) => Math.max(0, Number($<HTMLInputElement>(id).value) || 0);
+  const kcal = num('fKcal');
+  if (!kcal) { foodMsg.textContent = 'Enter the calories first.'; return; }
+  Food.addFood({
+    at: Date.now(),
+    name: $<HTMLInputElement>('fName').value.trim() || 'Meal',
+    kcal, protein: num('fProt'), carbs: num('fCarb'), fat: num('fFat'),
+    source: foodMode, confidence: estimate?.confidence,
+  });
+  foodDialog.close();
+  refreshFood();
+  toast('Added to your food log');
+}
+
+$('foodClose').addEventListener('click', () => foodDialog.close());
+$('foodMode').addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-mode]');
+  if (b) { setFoodMode(b.dataset.mode as 'photo' | 'search'); foodMsg.textContent = ''; show($('foodResult'), false); }
+});
+$<HTMLInputElement>('camInput').addEventListener('change', (ev) => { void onPhoto(ev.target as HTMLInputElement); });
+$<HTMLInputElement>('picInput').addEventListener('change', (ev) => { void onPhoto(ev.target as HTMLInputElement); });
+foodGo.addEventListener('click', () => { void runEstimate(); });
+foodText.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && foodMode === 'search') void runEstimate(); });
+$('foodAdd').addEventListener('click', addToLog);
+$('keySave').addEventListener('click', () => {
+  const k = $<HTMLInputElement>('keyInput').value.trim();
+  if (!k && !apiKey.get()) { toast('Paste your key first'); return; }
+  if (k) apiKey.set(k);
+  modelOverride.set($<HTMLInputElement>('modelInput').value);
+  showKeyBox(false);
+  foodMsg.textContent = 'Key saved. Now add a photo or description.';
+  refreshFood();
+});
+
 function skeleton(): Node[] {
   const grid = el('div', 'grid');
   grid.append(el('div', 'skel tall'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'), el('div', 'skel'));
@@ -568,7 +797,7 @@ async function loadAll() {
     if (hero) nodes.push(hero);
     const sleepSec = sleepSection(sleep);
     if (sleepSec) nodes.push(sleepSec);
-    nodes.push(placesNode());
+    nodes.push(placesNode(), foodNode());
 
     for (const g of GROUPS) {
       const rs = withData.filter((r) => r.group === g);
@@ -601,7 +830,7 @@ async function loadAll() {
     }
 
     contentEl.replaceChildren(...nodes);
-    lastExport = { source: 'Android Health Connect', generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts, places: placesExport() };
+    lastExport = { source: 'Android Health Connect', generatedAt: now.toISOString(), rangeDays: days, metrics: results, sleep, workouts, places: placesExport(), food: foodExport() };
     show($('copy'), true);
     setStatus(`Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${DEMO ? ' · demo data' : ''}`, 'ok');
   } finally {
@@ -652,6 +881,7 @@ function openSheet() {
   $('sheetRange').textContent = lastExport.rangeDays === 1 ? 'today' : `the last ${lastExport.rangeDays} days`;
   copyBtn.textContent = 'Copy';
   lastExport.places = placesExport();
+  lastExport.food = foodExport();
   $('placesRow').hidden = !lastExport.places;
   fillPreview();
   sheet.showModal();
@@ -719,8 +949,9 @@ $('range').addEventListener('click', (ev) => {
 
 async function init() {
   $('date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  if (DEMO) Places.seedDemo();
+  if (DEMO) { Places.seedDemo(); Food.seedDemoFood(); }
   else {
+    Food.loadFood();
     Places.load();
     // Resume tracking after the app was closed. Needs the app in the foreground, which it is right now.
     if (Places.state.enabled && NATIVE) void Places.startTracking(refreshPlaces, (m) => toast(m)).catch(() => { /* shown as off */ });

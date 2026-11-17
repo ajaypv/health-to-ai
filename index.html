@@ -76,6 +76,55 @@
       </div>
     </dialog>
 
+    <dialog id="foodSheet" class="sheet" aria-labelledby="foodTitle">
+      <div class="sheet-body">
+        <div class="sheet-head">
+          <h2 id="foodTitle">Add food</h2>
+          <button id="foodClose" class="icon-btn" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+
+        <div id="keyBox" class="stack" hidden>
+          <p class="sheet-lead">Calories are estimated by Google Gemini. Paste a free API key from <b>aistudio.google.com/apikey</b>. It is saved only on this phone. Photos and text you add are sent to Google.</p>
+          <input id="keyInput" type="password" placeholder="Gemini API key" autocomplete="off" aria-label="Gemini API key" />
+          <input id="modelInput" type="text" placeholder="Model (optional, leave empty for automatic)" autocomplete="off" aria-label="Gemini model" />
+          <button id="keySave" class="primary">Save key</button>
+        </div>
+
+        <div id="foodMain" class="stack">
+          <div id="foodMode" class="seg" role="group" aria-label="How to add">
+            <button data-mode="photo" aria-pressed="true">Photo</button>
+            <button data-mode="search" aria-pressed="false">Search the web</button>
+          </div>
+          <div id="photoPane" class="stack">
+            <div class="sheet-actions">
+              <label class="secondary filebtn">Take photo<input id="camInput" type="file" accept="image/*" capture="environment" hidden /></label>
+              <label class="secondary filebtn">Choose photo<input id="picInput" type="file" accept="image/*" hidden /></label>
+            </div>
+            <img id="foodImg" class="food-img" alt="Photo of your food" hidden />
+          </div>
+          <input id="foodText" type="text" autocomplete="off" aria-label="Description" />
+          <button id="foodGo" class="primary">Estimate calories</button>
+          <p id="foodMsg" class="sub" role="status"></p>
+
+          <div id="foodResult" class="stack" hidden>
+            <input id="fName" type="text" maxlength="80" aria-label="Meal name" />
+            <div class="macro-grid">
+              <label>Calories<input id="fKcal" type="number" inputmode="decimal" min="0" /></label>
+              <label>Protein g<input id="fProt" type="number" inputmode="decimal" min="0" /></label>
+              <label>Carbs g<input id="fCarb" type="number" inputmode="decimal" min="0" /></label>
+              <label>Fat g<input id="fFat" type="number" inputmode="decimal" min="0" /></label>
+            </div>
+            <ul id="fItems" class="list"></ul>
+            <p id="fMeta" class="sub"></p>
+            <p id="fSources" class="sub"></p>
+            <button id="foodAdd" class="primary">Add to my food log</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="nameSheet" class="sheet" aria-labelledby="nameTitle">
       <div class="sheet-body">
         <h2 id="nameTitle">Name this place</h2>

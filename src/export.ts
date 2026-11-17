@@ -102,6 +102,15 @@ function summary(data: ExportData): string {
     }
   }
 
+  const fd = data.food;
+  if (fd && fd.meals.length) {
+    out.push('', '## Food log (meals I logged in the app)');
+    for (const d of fd.byDay) out.push(`- ${keyLabel(d.date)}: ${Math.round(d.kcal)} kcal · protein ${Math.round(d.protein)} g · carbs ${Math.round(d.carbs)} g · fat ${Math.round(d.fat)} g`);
+    out.push('- Meals:');
+    for (const m of fd.meals) out.push(`  - ${dayLabel(new Date(m.at))} ${clock(m.at)}: ${m.name}, ${Math.round(m.kcal)} kcal (protein ${Math.round(m.protein)} g, carbs ${Math.round(m.carbs)} g, fat ${Math.round(m.fat)} g)`);
+    out.push(`- ${fd.note}`);
+  }
+
   const pl = data.places;
   if (pl) {
     out.push('', '## Places (where I spent my time)');

@@ -37,6 +37,13 @@ export interface PlacesExport {
   visits: { place: string; start: string; end: string; minutes: number }[];
 }
 
+/** Meals logged in this app (calories estimated by AI from photos or web search). */
+export interface FoodExport {
+  note: string;
+  byDay: { date: string; kcal: number; protein: number; carbs: number; fat: number }[];
+  meals: { at: string; name: string; kcal: number; protein: number; carbs: number; fat: number; source: string }[];
+}
+
 /** Everything the app read, in the shape that is copied out as JSON. */
 export interface ExportData {
   source: string;
@@ -46,4 +53,5 @@ export interface ExportData {
   sleep: SleepSession[];
   workouts: Workout[];
   places?: PlacesExport;
+  food?: FoodExport;
 }
